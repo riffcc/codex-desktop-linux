@@ -11,6 +11,9 @@ INSTALL_DIR="${CODEX_INSTALL_DIR:-$SCRIPT_DIR/codex-app}"
 ELECTRON_VERSION="40.0.0"
 WORK_DIR="$(mktemp -d)"
 ARCH="$(uname -m)"
+DESKTOP_ENTRY_ID="riff-codex-desktop"
+DESKTOP_APPS_DIR="${XDG_DATA_HOME:-$HOME/.local/share}/applications"
+DESKTOP_ICONS_DIR="${XDG_DATA_HOME:-$HOME/.local/share}/icons/hicolor/scalable/apps"
 
 RED='\033[0;31m'
 GREEN='\033[0;32m'
@@ -30,15 +33,15 @@ trap 'error "Failed at line $LINENO (exit code $?)"' ERR
 # ---- Check dependencies ----
 check_deps() {
     local missing=()
-    for cmd in node npm npx python3 7z curl unzip; do
+    for cmd in node npm npx cargo 7z curl unzip; do
         command -v "$cmd" &>/dev/null || missing+=("$cmd")
     done
     if [ ${#missing[@]} -ne 0 ]; then
         error "Missing dependencies: ${missing[*]}
 Install them first:
-  sudo apt install nodejs npm python3 p7zip-full curl unzip build-essential  # Debian/Ubuntu
-  sudo dnf install nodejs npm python3 p7zip curl unzip && sudo dnf groupinstall 'Development Tools'  # Fedora
-  sudo pacman -S nodejs npm python p7zip curl unzip base-devel  # Arch"
+  sudo apt install nodejs npm cargo rustc p7zip-full curl unzip build-essential  # Debian/Ubuntu
+  sudo dnf install nodejs npm cargo rust p7zip curl unzip && sudo dnf groupinstall 'Development Tools'  # Fedora
+  sudo pacman -S nodejs npm cargo rust p7zip curl unzip base-devel  # Arch"
     fi
 
     NODE_MAJOR=$(node -v | cut -d. -f1 | tr -d v)
@@ -159,6 +162,67 @@ patch_asar() {
     rm -rf "$WORK_DIR/app-extracted/node_modules/sparkle-darwin" 2>/dev/null || true
     find "$WORK_DIR/app-extracted" -name "sparkle.node" -delete 2>/dev/null || true
 
+    # Make Linux windows explicitly resizable in the extracted Electron bundle.
+    local main_bundle="$WORK_DIR/app-extracted/.vite/build/main.js"
+    if [ -f "$main_bundle" ]; then
+        python3 - "$main_bundle" <<'PY'
+from pathlib import Path
+import sys
+
+path = Path(sys.argv[1])
+text = path.read_text()
+replacements = [
+    (
+        "e===`secondary`?{titleBarStyle:`default`}",
+        "e===`secondary`?{titleBarStyle:`default`,resizable:!0}",
+    ),
+    (
+        "e===`hud`?{titleBarStyle:`default`,minimizable:!1,maximizable:!1,fullscreenable:!1,alwaysOnTop:!0}",
+        "e===`hud`?{titleBarStyle:`default`,resizable:!0,minimizable:!1,maximizable:!1,fullscreenable:!1,alwaysOnTop:!0}",
+    ),
+    (
+        ":{titleBarStyle:`default`})",
+        ":{titleBarStyle:`default`,resizable:!0})",
+    ),
+    (
+        "backgroundColor:S,show:a,",
+        "backgroundColor:S,show:a,resizable:!0,",
+    ),
+    (
+        "backgroundColor:S,show:a,...process.platform===`win32`?{autoHideMenuBar:!0}:{}",
+        "backgroundColor:S,show:a,resizable:!0,...process.platform===`win32`?{autoHideMenuBar:!0}:{}",
+    ),
+]
+
+for needle, replacement in replacements:
+    if needle in text:
+        text = text.replace(needle, replacement, 1)
+
+runtime_replacements = [
+    ("n.setResizable(!1),n.setMaximizable(!1),n.setFullScreenable(!1),", "n.setResizable(!0),n.setMaximizable(!0),n.setFullScreenable(!0),"),
+]
+
+for needle, replacement in runtime_replacements:
+    if needle in text:
+        text = text.replace(needle, replacement, 1)
+
+zoom_segment = "let Oe=e?[]:[{role:`zoomIn`,accelerator:`Ctrl+=`,acceleratorWorksWhenHidden:!0,visible:!1}];De.push({type:`separator`},{role:`zoomIn`},...Oe,{role:`zoomOut`},{role:`resetZoom`},{type:`separator`},{role:`togglefullscreen`}),"
+zoom_replacement = (
+    "let Oe=e?[]:[{label:`Zoom In`,accelerator:`Ctrl+=`,acceleratorWorksWhenHidden:!0,visible:!1,click:async()=>{let e=await h();if(e){let t=e.webContents,n=Math.min(3,(t.getZoomFactor?.()??1)+.1);t.setZoomFactor(n),t.invalidate?.(),await t.executeJavaScript?.(\"window.dispatchEvent(new Event('resize'));document.documentElement&&document.documentElement.getBoundingClientRect();\",!0).catch(()=>{}),e.focus()}}}];"
+    "let Re=async e=>{let t=await h();if(!t)return;let n=t.webContents,r=e(n.getZoomFactor?.()??1);n.setZoomFactor(r),n.invalidate?.(),await n.executeJavaScript?.(\"window.dispatchEvent(new Event('resize'));document.documentElement&&document.documentElement.getBoundingClientRect();\",!0).catch(()=>{}),t.focus()};"
+    "De.push({type:`separator`},{label:`Zoom In`,accelerator:`CmdOrCtrl+Plus`,click:async()=>{await Re(e=>Math.min(3,e+.1))}},...Oe,{label:`Zoom Out`,accelerator:`CmdOrCtrl+-`,click:async()=>{await Re(e=>Math.max(.5,e-.1))}},{label:`Actual Size`,accelerator:`CmdOrCtrl+0`,click:async()=>{await Re(()=>1)}},{type:`separator`},{role:`togglefullscreen`}),"
+)
+
+if zoom_segment in text:
+    text = text.replace(zoom_segment, zoom_replacement, 1)
+
+path.write_text(text)
+PY
+        info "Patched Linux window chrome to be explicitly resizable"
+    else
+        warn "Main Electron bundle not found at $main_bundle; skipping resize patch"
+    fi
+
     # Build native modules in clean environment and copy back
     build_native_modules "$WORK_DIR/app-extracted"
 
@@ -201,6 +265,29 @@ extract_webview() {
     local asar_extracted="$WORK_DIR/app-extracted"
     if [ -d "$asar_extracted/webview" ]; then
         cp -r "$asar_extracted/webview/"* "$INSTALL_DIR/content/webview/"
+        if [ -f "$SCRIPT_DIR/controller-shim.js" ]; then
+            cp "$SCRIPT_DIR/controller-shim.js" "$INSTALL_DIR/content/webview/assets/controller-shim.js"
+        fi
+        if [ -f "$SCRIPT_DIR/vendor/gamepad_standardizer.esm.js" ]; then
+            cp "$SCRIPT_DIR/vendor/gamepad_standardizer.esm.js" \
+                "$INSTALL_DIR/content/webview/assets/gamepad_standardizer.esm.js"
+        fi
+        if [ -f "$INSTALL_DIR/content/webview/index.html" ]; then
+            python3 - "$INSTALL_DIR/content/webview/index.html" <<'PY'
+from pathlib import Path
+import sys
+
+path = Path(sys.argv[1])
+text = path.read_text()
+snippet = '    <script type="module" src="./assets/controller-shim.js"></script>\n'
+needle = '    <script type="module" crossorigin src="./assets/index-CMu6BCpo.js"></script>\n'
+
+if snippet not in text and needle in text:
+    text = text.replace(needle, snippet + needle, 1)
+
+path.write_text(text)
+PY
+        fi
         info "Webview files copied"
     else
         warn "Webview directory not found in asar — app may not work"
@@ -218,34 +305,54 @@ install_app() {
 
 # ---- Create start script ----
 create_start_script() {
+    cargo build --release --manifest-path "$SCRIPT_DIR/Cargo.toml" >&2
+
+    install -Dm755 "$SCRIPT_DIR/target/release/codex-desktop-linux" "$INSTALL_DIR/codex-desktop-linux"
+
     cat > "$INSTALL_DIR/start.sh" << 'SCRIPT'
 #!/bin/bash
 SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
-WEBVIEW_DIR="$SCRIPT_DIR/content/webview"
+RIFF_CODEX_CLI_PATH="${RIFF_CODEX_CLI_PATH:-$HOME/.local/bin/riff-codex}"
 
-pkill -f "http.server 5175" 2>/dev/null
-sleep 0.3
-
-if [ -d "$WEBVIEW_DIR" ] && [ "$(ls -A "$WEBVIEW_DIR" 2>/dev/null)" ]; then
-    cd "$WEBVIEW_DIR"
-    python3 -m http.server 5175 &> /dev/null &
-    HTTP_PID=$!
-    trap "kill $HTTP_PID 2>/dev/null" EXIT
+if [ -z "${CODEX_CLI_PATH:-}" ] && [ -x "$RIFF_CODEX_CLI_PATH" ]; then
+    export CODEX_CLI_PATH="$RIFF_CODEX_CLI_PATH"
 fi
 
-export CODEX_CLI_PATH="${CODEX_CLI_PATH:-$(which codex 2>/dev/null)}"
-
-if [ -z "$CODEX_CLI_PATH" ]; then
-    echo "Error: Codex CLI not found. Install with: npm i -g @openai/codex"
-    exit 1
-fi
-
-cd "$SCRIPT_DIR"
-exec "$SCRIPT_DIR/electron" --no-sandbox "$@"
+exec "$SCRIPT_DIR/codex-desktop-linux" "$@"
 SCRIPT
 
     chmod +x "$INSTALL_DIR/start.sh"
-    info "Start script created"
+    info "Rust launcher and start script created"
+}
+
+# ---- Install desktop entry ----
+install_desktop_entry() {
+    local icon_source="$INSTALL_DIR/content/webview/assets/app-D0g8sCle.png"
+    local icon_target="$DESKTOP_ICONS_DIR/${DESKTOP_ENTRY_ID}.png"
+    local desktop_target="$DESKTOP_APPS_DIR/${DESKTOP_ENTRY_ID}.desktop"
+
+    if [ ! -f "$icon_source" ]; then
+        warn "Codex app icon not found at $icon_source; skipping desktop entry"
+        return
+    fi
+
+    mkdir -p "$DESKTOP_APPS_DIR" "$DESKTOP_ICONS_DIR"
+    install -Dm644 "$icon_source" "$icon_target"
+
+    cat > "$desktop_target" <<EOF
+[Desktop Entry]
+Version=1.0
+Type=Application
+Name=Codex Desktop
+Comment=Codex Desktop for Linux with Riff runtime compatibility
+Exec=$INSTALL_DIR/start.sh
+Icon=$DESKTOP_ENTRY_ID
+Terminal=false
+Categories=Development;Utility;
+StartupNotify=true
+EOF
+
+    info "Desktop entry installed at $desktop_target"
 }
 
 # ---- Main ----
@@ -273,9 +380,10 @@ main() {
     extract_webview "$app_dir"
     install_app
     create_start_script
+    install_desktop_entry
 
-    if ! command -v codex &>/dev/null; then
-        warn "Codex CLI not found. Install it: npm i -g @openai/codex"
+    if [ ! -x "${RIFF_CODEX_CLI_PATH:-$HOME/.local/bin/riff-codex}" ] && ! command -v codex &>/dev/null; then
+        warn "Codex CLI not found. Install the Riff fork to ~/.local/bin/riff-codex or set CODEX_CLI_PATH."
     fi
 
     echo ""                                             >&2

@@ -17,25 +17,25 @@ The installer:
 
 ## Prerequisites
 
-**Node.js 20+**, **npm**, **Python 3**, **7z**, **curl**, and **build tools** (gcc/g++/make).
+**Node.js 20+**, **npm**, **Rust/Cargo**, **7z**, **curl**, and **build tools** (gcc/g++/make).
 
 ### Debian/Ubuntu
 
 ```bash
-sudo apt install nodejs npm python3 p7zip-full curl build-essential
+sudo apt install nodejs npm cargo rustc p7zip-full curl build-essential
 ```
 
 ### Fedora
 
 ```bash
-sudo dnf install nodejs npm python3 p7zip curl
+sudo dnf install nodejs npm cargo rust p7zip curl
 sudo dnf groupinstall 'Development Tools'
 ```
 
 ### Arch
 
 ```bash
-sudo pacman -S nodejs npm python p7zip curl base-devel
+sudo pacman -S nodejs npm cargo rust p7zip curl base-devel
 ```
 
 You also need the **Codex CLI**:
@@ -92,17 +92,22 @@ The macOS Codex app is an Electron application. The core code (`app.asar`) is pl
 
 The installer replaces the macOS Electron with a Linux build and recompiles the native modules using `@electron/rebuild`. The `sparkle` module (macOS-only auto-updater) is removed since it has no Linux equivalent.
 
-A small Python HTTP server is used as a workaround: when `app.isPackaged` is `false` (which happens with extracted builds), the app tries to connect to a Vite dev server on `localhost:5175`. The HTTP server serves the static webview files on that port.
+The Riff fork replaces the upstream Python `http.server` workaround with a small Rust launcher that:
+
+- serves extracted webview assets from an embedded local HTTP server
+- binds `127.0.0.1:5175` for compatibility with the current extracted app
+- resolves the Codex CLI path before launch
+- supervises Electron process startup from a single runtime entrypoint
 
 ## Troubleshooting
 
 | Problem | Solution |
 |---------|----------|
 | `Error: write EPIPE` | Make sure you're not piping the output — run `start.sh` directly |
-| Blank window | Check that port 5175 is not in use: `lsof -i :5175` |
+| Blank window | Check that the Rust launcher started cleanly and that `content/webview/` was extracted |
 | `CODEX_CLI_PATH` error | Install CLI: `npm i -g @openai/codex` |
 | GPU/rendering issues | Try: `./codex-app/start.sh --disable-gpu` |
-| Sandbox errors | The `--no-sandbox` flag is already set in `start.sh` |
+| Sandbox errors | Check whether your Linux environment supports Electron sandboxing cleanly |
 
 ## Disclaimer
 
