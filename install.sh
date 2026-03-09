@@ -313,6 +313,11 @@ create_start_script() {
 #!/bin/bash
 SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
 RIFF_CODEX_CLI_PATH="${RIFF_CODEX_CLI_PATH:-$HOME/.local/bin/riff-codex}"
+CODEX_TUI_HANDY_PRESS_CMD="${CODEX_TUI_HANDY_PRESS_CMD:-xdotool keydown ctrl+space}"
+CODEX_TUI_HANDY_RELEASE_CMD="${CODEX_TUI_HANDY_RELEASE_CMD:-xdotool keyup ctrl+space}"
+
+export CODEX_TUI_HANDY_PRESS_CMD
+export CODEX_TUI_HANDY_RELEASE_CMD
 
 if [ -z "${CODEX_CLI_PATH:-}" ] && [ -x "$RIFF_CODEX_CLI_PATH" ]; then
     export CODEX_CLI_PATH="$RIFF_CODEX_CLI_PATH"
