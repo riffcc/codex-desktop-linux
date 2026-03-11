@@ -318,6 +318,7 @@ create_start_script() {
     cargo build --release --manifest-path "$SCRIPT_DIR/Cargo.toml" >&2
 
     install -Dm755 "$SCRIPT_DIR/target/release/codex-desktop-linux" "$INSTALL_DIR/codex-desktop-linux"
+    install -Dm755 "$SCRIPT_DIR/scripts/bootstrap-local-voice.sh" "$INSTALL_DIR/bootstrap-local-voice.sh"
 
     cat > "$INSTALL_DIR/start.sh" << 'SCRIPT'
 #!/bin/bash
@@ -331,6 +332,10 @@ export CODEX_TUI_HANDY_RELEASE_CMD
 
 if [ -z "${CODEX_CLI_PATH:-}" ] && [ -x "$RIFF_CODEX_CLI_PATH" ]; then
     export CODEX_CLI_PATH="$RIFF_CODEX_CLI_PATH"
+fi
+
+if [ -x "$SCRIPT_DIR/bootstrap-local-voice.sh" ]; then
+    "$SCRIPT_DIR/bootstrap-local-voice.sh" >/dev/null 2>&1 &
 fi
 
 exec "$SCRIPT_DIR/codex-desktop-linux" "$@"
