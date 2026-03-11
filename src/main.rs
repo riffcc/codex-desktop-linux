@@ -1,5 +1,6 @@
 use std::env;
 use std::fs;
+use std::fs::OpenOptions;
 use std::io::{Read, Write};
 use std::net::{Shutdown, TcpListener, TcpStream};
 use std::path::{Component, Path, PathBuf};
@@ -32,6 +33,15 @@ fn run() -> Result<(), String> {
     } else {
         None
     };
+    let log_path = script_dir.join("codex-desktop-linux.log");
+    let stdout_log = OpenOptions::new()
+        .create(true)
+        .append(true)
+        .open(&log_path)
+        .map_err(|err| format!("failed to open launcher log {}: {err}", log_path.display()))?;
+    let stderr_log = stdout_log
+        .try_clone()
+        .map_err(|err| format!("failed to clone launcher log handle: {err}"))?;
 
     let mut electron = Command::new(script_dir.join("electron"));
     electron.current_dir(&script_dir);
@@ -39,8 +49,8 @@ fn run() -> Result<(), String> {
     electron.env("CODEX_CLI_PATH", codex_cli_path);
     let status = electron
         .stdin(Stdio::inherit())
-        .stdout(Stdio::inherit())
-        .stderr(Stdio::inherit())
+        .stdout(Stdio::from(stdout_log))
+        .stderr(Stdio::from(stderr_log))
         .status()
         .map_err(|err| format!("failed to start Electron: {err}"))?;
 

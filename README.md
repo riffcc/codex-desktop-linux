@@ -103,7 +103,7 @@ The Riff fork replaces the upstream Python `http.server` workaround with a small
 
 | Problem | Solution |
 |---------|----------|
-| `Error: write EPIPE` | Make sure you're not piping the output — run `start.sh` directly |
+| `Error: write EPIPE` | Update to the launcher that logs Electron output to `codex-desktop-linux.log` instead of inheriting a broken stdio pipe |
 | Blank window | Check that the Rust launcher started cleanly and that `content/webview/` was extracted |
 | `CODEX_CLI_PATH` error | Install CLI: `npm i -g @openai/codex` |
 | GPU/rendering issues | Try: `./codex-app/start.sh --disable-gpu` |

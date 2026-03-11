@@ -216,6 +216,16 @@ zoom_replacement = (
 if zoom_segment in text:
     text = text.replace(zoom_segment, zoom_replacement, 1)
 
+workspace_warning = "async function hD(e,t,n){return Promise.all(e.map(async e=>{try{return await gD(Up(e),t,n)}catch(t){return vg().warning(`[git-origin-and-roots] Failed to resolve origin for workspace`,{safe:{},sensitive:{error:t}}),{dir:Up(e),root:Hp(e),originUrl:null,commonDir:null}}}))}"
+workspace_warning_replacement = "async function hD(e,t,n){return Promise.all(e.map(async e=>{try{return await gD(Up(e),t,n)}catch(t){let n=`${t?.message??t}`;return n.includes(`path does not exist`)?{dir:Up(e),root:Hp(e),originUrl:null,commonDir:null}:(vg().warning(`[git-origin-and-roots] Failed to resolve origin for workspace`,{safe:{},sensitive:{error:t}}),{dir:Up(e),root:Hp(e),originUrl:null,commonDir:null})}}))}"
+if workspace_warning in text:
+    text = text.replace(workspace_warning, workspace_warning_replacement, 1)
+
+message_handler = "if(await R9.handleMessage(e,t))return;let n=L9.getContextForWebContents(e.sender);if(!n){vg().warning(`Message received for unknown window context`);return}await n.handleMessage(e.sender,t)"
+message_handler_replacement = "if(await R9.handleMessage(e,t))return;let n=L9.getContextForWebContents(e.sender);if(!n){vg().warning(`Message received for unknown window context`);return}try{await n.handleMessage(e.sender,t)}catch(r){if(!`${r?.message??r}`.includes(`Object has been destroyed`))throw r;vg().debug?.(`[electron-message-handler] Ignored destroyed target during message handling`)}}"
+if message_handler in text:
+    text = text.replace(message_handler, message_handler_replacement, 1)
+
 path.write_text(text)
 PY
         info "Patched Linux window chrome to be explicitly resizable"
